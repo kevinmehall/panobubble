@@ -5,6 +5,8 @@ extern crate image;
 use glium::index::PrimitiveType;
 use glium::{glutin, Surface};
 use glium::uniforms::SamplerWrapFunction;
+use glutin::ElementState::{Pressed, Released};
+use glutin::VirtualKeyCode::{Left, Right, Up, Down, PageUp, PageDown};
 
 fn main() {
     let image_name = "./8192.jpg";
@@ -112,12 +114,15 @@ fn main() {
     ).unwrap();
 
     let mut closed = false;
-    let mut yaw = 0.0f32;
+    let mut yaw = 0.0f64;
     let mut yaw_rate = 0.0;
-    let mut pitch = 0.0f32;
+    let mut pitch = 0.0f64;
     let mut pitch_rate = 0.0;
-    let mut zoom = 1.0f32;
+    let mut zoom = 1.0f64;
     let mut zoom_rate = 1.0;
+    let mut mouse_pos = (0.0f64, 0.0f64);
+    let mut drag_state = None;
+
     while !closed {
         yaw += yaw_rate;
         pitch += pitch_rate;
@@ -129,10 +134,10 @@ fn main() {
 
         let uniforms = uniform! {
             window_aspect_ratio: height as f32 / width as f32,
-            yaw: yaw,
-            pitch: pitch,
+            yaw: yaw as f32,
+            pitch: pitch as f32,
             roll: 0.0f32,
-            zoom: zoom,
+            zoom: zoom as f32,
             image_offset: [
                 cropped_area_left_pixels as f32 / full_pano_width_pixels as f32,
                 cropped_area_top_pixels as f32 / full_pano_height_pixels as f32,
@@ -158,10 +163,9 @@ fn main() {
 
         events_loop.poll_events(|ev| match ev {
             glutin::Event::WindowEvent { event, .. } => match event {
+
                 glutin::WindowEvent::CloseRequested => closed = true,
                 glutin::WindowEvent::KeyboardInput { input, .. } => {
-                    use glutin::ElementState::{Pressed, Released};
-                    use glutin::VirtualKeyCode::{Left, Right, Up, Down, PageUp, PageDown};
 
                     let speed = 1.0 / 4.0 / 60.0;
 
@@ -181,6 +185,31 @@ fn main() {
                         _ => {}
                     }
                 }
+                glutin::WindowEvent::MouseInput { button, state, .. } => {
+                    match state {
+                        Pressed => drag_state = Some((mouse_pos, (yaw, pitch))),
+                        Released => drag_state = None
+                    }
+                }
+                glutin::WindowEvent::CursorMoved { position, .. } => {
+                    mouse_pos = (
+                        position.x / width as f64 * 2.0 - 1.0,
+                        (position.y / height as f64 * 2.0 - 1.0) * (height as f64 / width as f64)
+                    );
+
+                    if let Some(((start_x, start_y), (start_yaw, start_pitch))) = drag_state {
+                        let (x, y) = mouse_pos;
+                        yaw = (start_x.atan() - x.atan()) / zoom + start_yaw;
+                        pitch = (y.atan() - start_y.atan()) / zoom + start_pitch;
+                    }
+                }
+                glutin::WindowEvent::MouseWheel { delta: glutin::MouseScrollDelta::LineDelta(_, y), .. } => {
+                    zoom *= 1.0 + y as f64 * 0.08;
+                }
+                glutin::WindowEvent::MouseWheel { delta: glutin::MouseScrollDelta::PixelDelta(d), .. } => {
+                    zoom *= 1.0 + d.y as f64 * 0.01;
+                }
+                glutin::WindowEvent::Focused(false) => drag_state = None,
                 _ => (),
             },
             _ => (),
