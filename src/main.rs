@@ -161,7 +161,9 @@ fn main() {
             .unwrap();
         target.finish().unwrap();
 
-        events_loop.poll_events(|ev| match ev {
+        let idle = yaw_rate == 0.0 && pitch_rate == 0.0 && zoom_rate == 1.0;
+
+        let mut ev_handler = |ev| match ev {
             glutin::Event::WindowEvent { event, .. } => match event {
 
                 glutin::WindowEvent::CloseRequested => closed = true,
@@ -213,6 +215,16 @@ fn main() {
                 _ => (),
             },
             _ => (),
-        });
+        };
+
+        if idle {
+            // Blocking wait for next event
+            events_loop.run_forever(|event| {
+                ev_handler(event);
+                glium::glutin::ControlFlow::Break
+            });
+        }
+
+        events_loop.poll_events(ev_handler);
     }
 }
