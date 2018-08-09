@@ -1,23 +1,29 @@
 #[macro_use]
 extern crate glium;
 extern crate image;
+extern crate twoway;
+extern crate elementtree;
 
+use std::env;
+use std::fs::File;
+use std::io::Read;
 use glium::index::PrimitiveType;
 use glium::{glutin, Surface};
 use glium::uniforms::SamplerWrapFunction;
 use glutin::ElementState::{Pressed, Released};
 use glutin::VirtualKeyCode::{Left, Right, Up, Down, PageUp, PageDown};
 
-fn main() {
-    let image_name = "./8192.jpg";
-    let cropped_area_top_pixels = 3190;
-    let cropped_area_left_pixels = 0;
-    let cropped_area_width_pixels = 18710;
-    let cropped_area_height_pixels = 2961;
-    let full_pano_height_pixels = 9354;
-    let full_pano_width_pixels = 18710;
+mod metadata;
+
+fn main() -> Result<(), String> {
+    let args = env::args().collect::<Vec<_>>();
+    let image_name = args.get(1).ok_or(format!("Missing argument"))?;
 
     let input_img = image::open(image_name).unwrap().to_rgba();
+    let mut buf = Vec::new();
+    File::open(image_name).unwrap().take(1024*64).read_to_end(&mut buf);
+    let meta = metadata::parse(&buf[..], input_img.dimensions())?;
+    println!("{:?}", meta);
 
     let mut events_loop = glium::glutin::EventsLoop::new();
     let window = glium::glutin::WindowBuilder::new();
@@ -138,14 +144,8 @@ fn main() {
             pitch: pitch as f32,
             roll: 0.0f32,
             zoom: zoom as f32,
-            image_offset: [
-                cropped_area_left_pixels as f32 / full_pano_width_pixels as f32,
-                cropped_area_top_pixels as f32 / full_pano_height_pixels as f32,
-            ],
-            image_fov: [
-                cropped_area_width_pixels as f32 / full_pano_width_pixels as f32,
-                cropped_area_height_pixels as f32 / full_pano_height_pixels as f32,
-            ],
+            image_offset: [ meta.crop_left, meta.crop_top ],
+            image_fov: [ meta.width_ratio, meta.height_ratio ],
             tex: opengl_texture.sampled().wrap_function(SamplerWrapFunction::Clamp),
         };
 
@@ -187,7 +187,7 @@ fn main() {
                         _ => {}
                     }
                 }
-                glutin::WindowEvent::MouseInput { button, state, .. } => {
+                glutin::WindowEvent::MouseInput { state, .. } => {
                     match state {
                         Pressed => drag_state = Some((mouse_pos, (yaw, pitch))),
                         Released => drag_state = None
@@ -227,4 +227,6 @@ fn main() {
 
         events_loop.poll_events(ev_handler);
     }
+
+    return Ok(());
 }
