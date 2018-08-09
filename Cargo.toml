@@ -2,6 +2,7 @@
 name = "panobubble"
 version = "0.1.0"
 authors = ["Kevin Mehall <km@kevinmehall.net>"]
+license = "ISC"
 
 [dependencies]
 glium = "0.22.0"
