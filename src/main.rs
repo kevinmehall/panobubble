@@ -9,7 +9,7 @@ use std::fs::File;
 use std::io::Read;
 use glium::index::PrimitiveType;
 use glium::{glutin, Surface};
-use glium::uniforms::SamplerWrapFunction;
+use glium::uniforms::{ SamplerWrapFunction, MinifySamplerFilter, MagnifySamplerFilter };
 use glutin::ElementState::{Pressed, Released};
 use glutin::VirtualKeyCode::{Left, Right, Up, Down, PageUp, PageDown};
 
@@ -32,7 +32,7 @@ fn main() -> Result<(), String> {
 
     let image_dimensions = input_img.dimensions();
     let gl_image = glium::texture::RawImage2d::from_raw_rgba_reversed(&input_img.into_raw(), image_dimensions);
-    let opengl_texture = glium::texture::CompressedSrgbTexture2d::new(&display, gl_image).unwrap();
+    let opengl_texture = glium::texture::SrgbTexture2d::new(&display, gl_image).unwrap();
 
     let vertex_buffer = {
         #[derive(Copy, Clone)]
@@ -146,7 +146,10 @@ fn main() -> Result<(), String> {
             zoom: zoom as f32,
             image_offset: [ meta.crop_left, meta.crop_top ],
             image_fov: [ meta.width_ratio, meta.height_ratio ],
-            tex: opengl_texture.sampled().wrap_function(SamplerWrapFunction::Clamp),
+            tex: opengl_texture.sampled()
+                .wrap_function(SamplerWrapFunction::Clamp)
+                .minify_filter(MinifySamplerFilter::Linear)
+                .magnify_filter(MagnifySamplerFilter::Linear),
         };
 
         target.clear_color(0.0, 0.0, 0.0, 0.0);
