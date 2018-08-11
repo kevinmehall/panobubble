@@ -144,7 +144,7 @@ fn main() -> Result<(), String> {
             pitch: pitch as f32,
             roll: 0.0f32,
             zoom: zoom as f32,
-            image_offset: [ meta.crop_left, meta.crop_top ],
+            image_offset: [ meta.crop_left, 1.0 - meta.crop_top - meta.height_ratio ],
             image_fov: [ meta.width_ratio, meta.height_ratio ],
             tex: opengl_texture.sampled()
                 .wrap_function(SamplerWrapFunction::Clamp)
