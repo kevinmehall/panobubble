@@ -4,9 +4,12 @@ extern crate image;
 extern crate twoway;
 extern crate elementtree;
 
+use std::cmp::max;
+use image::Pixel;
 use std::env;
 use std::fs::File;
 use std::io::Read;
+use image::{ RgbaImage, Rgba };
 use glium::index::PrimitiveType;
 use glium::{glutin, Surface};
 use glium::uniforms::{ SamplerWrapFunction, MinifySamplerFilter, MagnifySamplerFilter };
@@ -21,9 +24,11 @@ fn main() -> Result<(), String> {
 
     let input_img = image::open(image_name).unwrap().to_rgba();
     let mut buf = Vec::new();
-    File::open(image_name).unwrap().take(1024*64).read_to_end(&mut buf);
+    File::open(image_name).unwrap().take(1024*64).read_to_end(&mut buf).map_err(|e| format!("Failed to open file: {}", e))?;
     let meta = metadata::parse(&buf[..], input_img.dimensions())?;
     println!("{:?}", meta);
+
+    let background_img = make_background(&input_img, meta);
 
     let mut events_loop = glium::glutin::EventsLoop::new();
     let window = glium::glutin::WindowBuilder::new();
@@ -33,6 +38,12 @@ fn main() -> Result<(), String> {
     let image_dimensions = input_img.dimensions();
     let gl_image = glium::texture::RawImage2d::from_raw_rgba_reversed(&input_img.into_raw(), image_dimensions);
     let opengl_texture = glium::texture::SrgbTexture2d::new(&display, gl_image).unwrap();
+
+    let bg_dimensions = background_img.dimensions();
+    let gl_image = glium::texture::RawImage2d::from_raw_rgba_reversed(&background_img.into_raw(), bg_dimensions);
+    let background_texture = glium::texture::SrgbTexture2d::new(&display, gl_image).unwrap();
+
+    println!("{:?}", opengl_texture.get_internal_format());
 
     let vertex_buffer = {
         #[derive(Copy, Clone)]
@@ -110,9 +121,9 @@ fn main() -> Result<(), String> {
                     vec2 pos = (coord - image_offset) / image_fov;
 
                     if (pos.y > 1 || pos.y < 0) {
-                        f_color = vec4(0, 0, 0, 1);
+                       f_color = texture(bgtex, coord);
                     } else {
-                        f_color = texture(tex, pos);
+                       f_color = texture(tex, pos);
                     }
                 }
             "
@@ -147,6 +158,10 @@ fn main() -> Result<(), String> {
             image_offset: [ meta.crop_left, 1.0 - meta.crop_top - meta.height_ratio ],
             image_fov: [ meta.width_ratio, meta.height_ratio ],
             tex: opengl_texture.sampled()
+                .wrap_function(SamplerWrapFunction::Clamp)
+                .minify_filter(MinifySamplerFilter::Linear)
+                .magnify_filter(MagnifySamplerFilter::Linear),
+            bgtex: background_texture.sampled()
                 .wrap_function(SamplerWrapFunction::Clamp)
                 .minify_filter(MinifySamplerFilter::Linear)
                 .magnify_filter(MagnifySamplerFilter::Linear),
@@ -232,4 +247,110 @@ fn main() -> Result<(), String> {
     }
 
     return Ok(());
+}
+
+fn into_linear(x: u8) -> f32 {
+    let x = x as f32 / 255.0;
+    if x <= 0.04045 {
+        x / 12.92
+    } else {
+        ((x + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn from_linear(x: f32) -> u8 {
+    (if x <= 0.0031308 {
+        x * 12.92
+    } else {
+        x.powf(1.0 / 2.4) * 1.055 - 0.055
+    } * 255.0) as u8
+}
+
+fn make_background(image: &RgbaImage, meta: metadata::PanoMeta) -> RgbaImage {
+    let bw = 2048;
+    let bh = 1024;
+
+    let bcw = (bw as f32 * meta.width_ratio) as u32;
+    let bch = (bh as f32 * meta.height_ratio) as u32;
+
+    let bcx = (bw as f32 * meta.crop_left) as u32;
+    let bcy = (bh as f32 * meta.crop_top) as u32;
+
+    let small = image::imageops::resize(image, bcw, bch, image::imageops::FilterType::Triangle);
+    let mut background_img = image::RgbaImage::new(bw, bh);
+    image::imageops::replace(&mut background_img, &small, bcx, bcy);
+
+    let mut row = (0..bw).map(|x| {
+        let (r, g, b, _) = background_img.get_pixel(x, bcy).channels4();
+        (into_linear(r), into_linear(g), into_linear(b))
+    }).collect::<Vec<_>>();
+
+    for y in (0..bcy).rev() {
+        let p = y as f32 / bh as f32;
+        let w = max(((1.0 - p * 2.0).powf(3.0) / 12.0 * bw as f32) as u32, 4);
+
+        let i = (w * 2 + 1) as f32;
+
+        let next_row = (0..bw).map(|x| {
+            let mut sum = (0f32, 0f32, 0f32);
+            for xs in x+bw-w ..= x+bw+w {
+                let k = row[(xs % bw) as usize];
+                sum.0 += k.0;
+                sum.1 += k.1;
+                sum.2 += k.2;
+            }
+
+            sum.0 /= i;
+            sum.1 /= i;
+            sum.2 /= i;
+
+            background_img.put_pixel(x, y, Rgba::from_channels(
+                from_linear(sum.0),
+                from_linear(sum.1),
+                from_linear(sum.2),
+                255));
+
+            sum
+        }).collect::<Vec<_>>();
+
+        row = next_row;
+    }
+
+    let mut row = (0..bw).map(|x| {
+        let (r, g, b, _) = background_img.get_pixel(x, bcy+bch-1).channels4();
+        (into_linear(r), into_linear(g), into_linear(b))
+    }).collect::<Vec<_>>();
+
+    for y in bcy+bch..bh {
+        let p = 1.0 - (y as f32 / bh as f32);
+        let w = max(((1.0 - p * 2.0).powf(3.0) / 12.0 * bw as f32) as u32, 4);
+
+        let i = (w * 2 + 1) as f32;
+
+        let next_row = (0..bw).map(|x| {
+            let mut sum = (0f32, 0f32, 0f32);
+            for xs in x+bw-w ..= x+bw+w {
+                let k = row[(xs % bw) as usize];
+                sum.0 += k.0;
+                sum.1 += k.1;
+                sum.2 += k.2;
+            }
+
+            sum.0 /= i;
+            sum.1 /= i;
+            sum.2 /= i;
+
+            background_img.put_pixel(x, y, Rgba::from_channels(
+                from_linear(sum.0),
+                from_linear(sum.1),
+                from_linear(sum.2),
+                255));
+
+            sum
+        }).collect::<Vec<_>>();
+
+        row = next_row;
+    }
+
+    background_img
 }
