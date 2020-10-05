@@ -10,8 +10,8 @@ use std::io::Read;
 use glium::index::PrimitiveType;
 use glium::{glutin, Surface};
 use glium::uniforms::{ SamplerWrapFunction, MinifySamplerFilter, MagnifySamplerFilter };
-use glutin::ElementState::{Pressed, Released};
-use glutin::VirtualKeyCode::{Left, Right, Up, Down, PageUp, PageDown};
+use glutin::{event_loop::ControlFlow, event::Event, event::WindowEvent, event::MouseScrollDelta, event::ElementState::{Pressed, Released}};
+use glutin::event::VirtualKeyCode::{Left, Right, Up, Down, PageUp, PageDown};
 
 mod metadata;
 
@@ -21,14 +21,14 @@ fn main() -> Result<(), String> {
 
     let input_img = image::open(image_name).unwrap().to_rgba();
     let mut buf = Vec::new();
-    File::open(image_name).unwrap().take(1024*64).read_to_end(&mut buf);
+    File::open(image_name).unwrap().take(1024*64).read_to_end(&mut buf).unwrap();
     let meta = metadata::parse(&buf[..], input_img.dimensions())?;
     println!("{:?}", meta);
 
-    let mut events_loop = glium::glutin::EventsLoop::new();
-    let window = glium::glutin::WindowBuilder::new();
+    let event_loop = glutin::event_loop::EventLoop::new();
+    let window = glutin::window::WindowBuilder::new();
     let context = glium::glutin::ContextBuilder::new();
-    let display = glium::Display::new(window, context, &events_loop).unwrap();
+    let display = glium::Display::new(window, context, &event_loop).unwrap();
 
     let image_dimensions = input_img.dimensions();
     let gl_image = glium::texture::RawImage2d::from_raw_rgba_reversed(&input_img.into_raw(), image_dimensions);
@@ -119,7 +119,6 @@ fn main() -> Result<(), String> {
         }
     ).unwrap();
 
-    let mut closed = false;
     let mut yaw = 0.0f64;
     let mut yaw_rate = 0.0;
     let mut pitch = 0.0f64;
@@ -129,49 +128,16 @@ fn main() -> Result<(), String> {
     let mut mouse_pos = (0.0f64, 0.0f64);
     let mut drag_state = None;
 
-    while !closed {
-        yaw += yaw_rate;
-        pitch += pitch_rate;
-        zoom *= zoom_rate;
+    event_loop.run(move |event, _, control_flow| {
+        let (width, height) = display.get_framebuffer_dimensions();
 
-        // drawing a frame
-        let mut target = display.draw();
-        let (width, height) = target.get_dimensions();
-
-        let uniforms = uniform! {
-            window_aspect_ratio: height as f32 / width as f32,
-            yaw: yaw as f32,
-            pitch: pitch as f32,
-            roll: 0.0f32,
-            zoom: zoom as f32,
-            image_offset: [ meta.crop_left, 1.0 - meta.crop_top - meta.height_ratio ],
-            image_fov: [ meta.width_ratio, meta.height_ratio ],
-            tex: opengl_texture.sampled()
-                .wrap_function(SamplerWrapFunction::Clamp)
-                .minify_filter(MinifySamplerFilter::Linear)
-                .magnify_filter(MagnifySamplerFilter::Linear),
-        };
-
-        target.clear_color(0.0, 0.0, 0.0, 0.0);
-        target
-            .draw(
-                &vertex_buffer,
-                &index_buffer,
-                &program,
-                &uniforms,
-                &Default::default(),
-            )
-            .unwrap();
-        target.finish().unwrap();
-
-        let idle = yaw_rate == 0.0 && pitch_rate == 0.0 && zoom_rate == 1.0;
-
-        let mut ev_handler = |ev| match ev {
-            glutin::Event::WindowEvent { event, .. } => match event {
-
-                glutin::WindowEvent::CloseRequested => closed = true,
-                glutin::WindowEvent::KeyboardInput { input, .. } => {
-
+        match event {
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::CloseRequested => {
+                    *control_flow = ControlFlow::Exit;
+                    return;
+                }
+                WindowEvent::KeyboardInput { input, .. } => {
                     let speed = 1.0 / 4.0 / 60.0;
 
                     match (input.virtual_keycode, input.state) {
@@ -179,10 +145,10 @@ fn main() -> Result<(), String> {
                         (Some(Left),  Released) => yaw_rate = 0.0,
                         (Some(Right), Pressed)  => yaw_rate = speed,
                         (Some(Right), Released) => yaw_rate = 0.0,
-                        (Some(Up),    Pressed)  => pitch_rate = -speed,
-                        (Some(Up),    Released) => pitch_rate = 0.0,
-                        (Some(Down),  Pressed)  => pitch_rate = speed,
+                        (Some(Down),  Pressed)  => pitch_rate = -speed,
                         (Some(Down),  Released) => pitch_rate = 0.0,
+                        (Some(Up),    Pressed)  => pitch_rate = speed,
+                        (Some(Up),    Released) => pitch_rate = 0.0,
                         (Some(PageUp),Pressed)  => zoom_rate = 0.99,
                         (Some(PageUp),Released) => zoom_rate = 1.0,
                         (Some(PageDown),Pressed)  => zoom_rate = 1.01,
@@ -190,13 +156,16 @@ fn main() -> Result<(), String> {
                         _ => {}
                     }
                 }
-                glutin::WindowEvent::MouseInput { state, .. } => {
+                WindowEvent::MouseInput { state, .. } => {
                     match state {
                         Pressed => drag_state = Some((mouse_pos, (yaw, pitch))),
                         Released => drag_state = None
                     }
                 }
-                glutin::WindowEvent::CursorMoved { position, .. } => {
+                WindowEvent::Focused(false) => {
+                    drag_state = None
+                }
+                WindowEvent::CursorMoved { position, .. } => {
                     mouse_pos = (
                         position.x / width as f64 * 2.0 - 1.0,
                         (position.y / height as f64 * 2.0 - 1.0) * (height as f64 / width as f64)
@@ -207,29 +176,63 @@ fn main() -> Result<(), String> {
                         yaw = (start_x.atan() - x.atan()) / zoom + start_yaw;
                         pitch = (y.atan() - start_y.atan()) / zoom + start_pitch;
                     }
+
+                    display.gl_window().window().request_redraw();
                 }
-                glutin::WindowEvent::MouseWheel { delta: glutin::MouseScrollDelta::LineDelta(_, y), .. } => {
+                WindowEvent::MouseWheel { delta: MouseScrollDelta::LineDelta(_, y), .. } => {
                     zoom *= 1.0 + y as f64 * 0.08;
+                    display.gl_window().window().request_redraw();
                 }
-                glutin::WindowEvent::MouseWheel { delta: glutin::MouseScrollDelta::PixelDelta(d), .. } => {
+                WindowEvent::MouseWheel { delta: MouseScrollDelta::PixelDelta(d), .. } => {
                     zoom *= 1.0 + d.y as f64 * 0.01;
+                    display.gl_window().window().request_redraw();
                 }
-                glutin::WindowEvent::Focused(false) => drag_state = None,
-                _ => (),
-            },
-            _ => (),
-        };
+                _ => {}
+            }
+            Event::MainEventsCleared => {
+                yaw += yaw_rate;
+                pitch += pitch_rate;
+                zoom *= zoom_rate;
 
-        if idle {
-            // Blocking wait for next event
-            events_loop.run_forever(|event| {
-                ev_handler(event);
-                glium::glutin::ControlFlow::Break
-            });
+                let idle = yaw_rate == 0.0 && pitch_rate == 0.0 && zoom_rate == 1.0;
+
+                if !idle {
+                    display.gl_window().window().request_redraw();
+                }
+            }
+            Event::RedrawRequested(_) => {
+                let mut target = display.draw();
+                let (width, height) = target.get_dimensions();
+
+                let uniforms = uniform! {
+                    window_aspect_ratio: height as f32 / width as f32,
+                    yaw: yaw as f32,
+                    pitch: pitch as f32,
+                    roll: 0.0f32,
+                    zoom: zoom as f32,
+                    image_offset: [ meta.crop_left, 1.0 - meta.crop_top - meta.height_ratio ],
+                    image_fov: [ meta.width_ratio, meta.height_ratio ],
+                    tex: opengl_texture.sampled()
+                        .wrap_function(SamplerWrapFunction::Clamp)
+                        .minify_filter(MinifySamplerFilter::Linear)
+                        .magnify_filter(MagnifySamplerFilter::Linear)
+                };
+
+                target.clear_color(0.0, 0.0, 0.0, 0.0);
+                target
+                    .draw(
+                        &vertex_buffer,
+                        &index_buffer,
+                        &program,
+                        &uniforms,
+                        &Default::default(),
+                    )
+                    .unwrap();
+                target.finish().unwrap();
+            }
+            _ => {}
         }
-
-        events_loop.poll_events(ev_handler);
-    }
-
-    return Ok(());
+        
+        *control_flow = ControlFlow::Wait;
+    });
 }

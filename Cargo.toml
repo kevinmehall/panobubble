@@ -5,7 +5,7 @@ authors = ["Kevin Mehall <km@kevinmehall.net>"]
 license = "ISC"
 
 [dependencies]
-glium = "0.25"
-image = "0.22"
-twoway = "0.1"
+glium = "0.27"
+image = "0.23"
+twoway = "0.2"
 elementtree = "0.5"
