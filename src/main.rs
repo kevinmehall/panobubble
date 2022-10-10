@@ -1,14 +1,8 @@
-#[macro_use]
-extern crate glium;
-extern crate image;
-extern crate twoway;
-extern crate elementtree;
-
 use std::env;
 use std::fs::File;
 use std::io::Read;
 use glium::index::PrimitiveType;
-use glium::{glutin, Surface};
+use glium::{glutin, Surface, implement_vertex, program, uniform};
 use glium::uniforms::{ SamplerWrapFunction, MinifySamplerFilter, MagnifySamplerFilter };
 use glutin::{event_loop::ControlFlow, event::Event, event::WindowEvent, event::MouseScrollDelta, event::ElementState::{Pressed, Released}};
 use glutin::event::VirtualKeyCode::{Left, Right, Up, Down, PageUp, PageDown};
@@ -19,7 +13,7 @@ fn main() -> Result<(), String> {
     let args = env::args().collect::<Vec<_>>();
     let image_name = args.get(1).ok_or(format!("Missing argument"))?;
 
-    let input_img = image::open(image_name).unwrap().to_rgba();
+    let input_img = image::open(image_name).unwrap().into_rgba8();
     let mut buf = Vec::new();
     File::open(image_name).unwrap().take(1024*64).read_to_end(&mut buf).unwrap();
     let meta = metadata::parse(&buf[..], input_img.dimensions())?;

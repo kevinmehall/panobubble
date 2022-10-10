@@ -3,9 +3,10 @@ name = "panobubble"
 version = "0.1.0"
 authors = ["Kevin Mehall <km@kevinmehall.net>"]
 license = "ISC"
+edition = "2021"
 
 [dependencies]
-glium = "0.27"
-image = "0.23"
-twoway = "0.2"
-elementtree = "0.5"
+glium = "0.32.1"
+image = "0.24"
+memchr = "2.5"
+elementtree = "1.2"

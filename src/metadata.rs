@@ -1,5 +1,5 @@
 use std::str::FromStr;
-use twoway;
+use memchr::memmem;
 use elementtree::Element;
 
 #[derive(Copy, Clone, Debug)]
@@ -34,8 +34,8 @@ fn find_xmp(buf: &[u8]) -> Result<Element, String> {
     // Almost like actually parsing the image headers...
     let start_pattern = b"<x:xmpmeta";
     let end_pattern = b"</x:xmpmeta>";
-    if let Some(start) = twoway::find_bytes(buf, start_pattern) {
-        if let Some(end) = twoway::find_bytes(&buf[start..], end_pattern) {
+    if let Some(start) = memmem::find(buf, start_pattern) {
+        if let Some(end) = memmem::find(&buf[start..], end_pattern) {
             let xmp_str = &buf[start..start+end+end_pattern.len()];
             return Element::from_reader(xmp_str).map_err(|e| format!("Failed to parse XMP: {:?}", e));
         }
